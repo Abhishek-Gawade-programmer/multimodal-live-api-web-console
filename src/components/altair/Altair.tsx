@@ -35,8 +35,34 @@ const declaration: FunctionDeclaration = {
   },
 };
 
+interface LightControlResponse {
+  brightness: number;
+  colorTemperature: string;
+}
+
+const controlLightFunctionDeclaration: FunctionDeclaration = {
+  name: "controlLight",
+  parameters: {
+    type: SchemaType.OBJECT,
+    description: "Set the brightness and color temperature of a room light.",
+    properties: {
+      brightness: {
+        type: SchemaType.STRING,
+        description:
+          "Light level from 0 to 100. Zero is off and 100 is full brightness.",
+      },
+      colorTemperature: {
+        type: SchemaType.STRING,
+        description:
+          "Color temperature of the light fixture which can be `daylight`, `cool` or `warm`.",
+      },
+    },
+    required: ["brightness", "colorTemperature"],
+  },
+};
+
 function AltairComponent() {
-  const [jsonString, setJSONString] = useState<string>("");
+  const [lightSettings, setLightSettings] = useState<string>("");
   const { client, setConfig } = useLiveAPIContext();
 
   useEffect(() => {
@@ -51,14 +77,14 @@ function AltairComponent() {
       systemInstruction: {
         parts: [
           {
-            text: 'You are my helpful assistant. Any time I ask you for a graph call the "render_altair" function I have provided you. Dont ask for additional information just make your best judgement.',
+            text: 'You are my helpful assistant. Any time I ask you for function change in the room brightness or color temperature, call the "controlLight" function I have provided you. Dont ask for additional information just make your best judgement.',
           },
         ],
       },
       tools: [
         // there is a free-tier quota for search
         { googleSearch: {} },
-        { functionDeclarations: [declaration] },
+        { functionDeclarations: [controlLightFunctionDeclaration] },
       ],
     });
   }, [setConfig]);
@@ -67,24 +93,43 @@ function AltairComponent() {
     const onToolCall = (toolCall: ToolCall) => {
       console.log(`got toolcall`, toolCall);
       const fc = toolCall.functionCalls.find(
-        (fc) => fc.name === declaration.name,
+        (fc) => fc.name === controlLightFunctionDeclaration.name
       );
       if (fc) {
-        const str = (fc.args as any).json_graph;
-        setJSONString(str);
+        // Handle controlLight function call
+        const brightness = (fc.args as any).brightness;
+        const colorTemperature = (fc.args as any).colorTemperature;
+        console.log(
+          `Setting light: brightness=${brightness}, colorTemperature=${colorTemperature}`
+        );
+        setLightSettings(
+          `brightness: ${brightness}, colorTemperature: ${colorTemperature}`
+        );
+
+        // You can add state handling for the light settings here if needed
+        // For example:
+        // setLightSettings({ brightness: Number(brightness), colorTemperature });
       }
+
       // send data for the response of your tool call
-      // in this case Im just saying it was successful
       if (toolCall.functionCalls.length) {
         setTimeout(
           () =>
             client.sendToolResponse({
               functionResponses: toolCall.functionCalls.map((fc) => ({
-                response: { output: { success: true } },
+                response: {
+                  output: {
+                    success: true,
+                    message:
+                      fc.name === controlLightFunctionDeclaration.name
+                        ? "Light settings updated successfully"
+                        : "Operation successful",
+                  },
+                },
                 id: fc.id,
               })),
             }),
-          200,
+          200
         );
       }
     };
@@ -94,14 +139,7 @@ function AltairComponent() {
     };
   }, [client]);
 
-  const embedRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (embedRef.current && jsonString) {
-      vegaEmbed(embedRef.current, JSON.parse(jsonString));
-    }
-  }, [embedRef, jsonString]);
-  return <div className="vega-embed" ref={embedRef} />;
+  return <div>{lightSettings}</div>;
 }
 
 export const Altair = memo(AltairComponent);
