@@ -1,68 +1,78 @@
-/**
- * Copyright 2024 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
+import {
+  type FunctionDeclaration,
+  GoogleGenerativeAI,
+  SchemaType,
+} from "@google/generative-ai";
 import { useEffect, useRef, useState, memo } from "react";
-import vegaEmbed from "vega-embed";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { ToolCall } from "../../multimodal-live-types";
+const API_KEY = process.env.REACT_APP_GEMINI_API_KEY as string;
 
-const declaration: FunctionDeclaration = {
-  name: "render_altair",
-  description: "Displays an altair graph in json format.",
+async function getHelpFromAdobePremierePro(prompt: string) {
+  const genAI = new GoogleGenerativeAI(API_KEY);
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const LIST_OF_URLS = [
+    "https://helpx.adobe.com/in/premiere-pro/using/import-media.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/open-projects.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/move-delete-projects.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/multiple-open-projects.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/project-shortcuts.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/backward-compatibility.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/edit-premiere-rush-projects-in-premiere-pro.html",
+    "https://helpx.adobe.com/in/premiere-pro/using/bestpractices-projects.html",
+  ];
+
+  const docDataList = await Promise.all(
+    LIST_OF_URLS.map(async (url) => {
+      const response = await fetch(url, {
+        mode: "no-cors",
+      });
+      let text = await response.text();
+      text = text.replace(/<[^>]*>?/g, "");
+      console.log(`text`, text);
+      return text;
+    })
+  );
+
+  const result = await model.generateContent([
+    ...docDataList.map((linkContent) => ({
+      inlineData: {
+        data: linkContent,
+        mimeType: "text/html",
+      },
+    })),
+    prompt,
+  ]);
+
+  return result.response.text();
+}
+
+const GetHelpFromAdobePremiereProDeclaration: FunctionDeclaration = {
+  name: "getHelpFromAdobePremierePro",
+  description: "Get  help from Adobe Premiere Pro official documentation",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
-      json_graph: {
+      prompt: {
         type: SchemaType.STRING,
         description:
-          "JSON STRING representation of the graph to render. Must be a string, not a json object",
+          "Prompt to get help from Adobe Premiere Pro official documentation as per user request",
       },
     },
-    required: ["json_graph"],
+    required: ["prompt"],
   },
 };
 
-interface LightControlResponse {
-  brightness: number;
-  colorTemperature: string;
-}
-
-const controlLightFunctionDeclaration: FunctionDeclaration = {
-  name: "controlLight",
-  parameters: {
-    type: SchemaType.OBJECT,
-    description: "Set the brightness and color temperature of a room light.",
-    properties: {
-      brightness: {
-        type: SchemaType.STRING,
-        description:
-          "Light level from 0 to 100. Zero is off and 100 is full brightness.",
-      },
-      colorTemperature: {
-        type: SchemaType.STRING,
-        description:
-          "Color temperature of the light fixture which can be `daylight`, `cool` or `warm`.",
-      },
-    },
-    required: ["brightness", "colorTemperature"],
+const functions = {
+  getHelpFromAdobePremierePro: async ({ prompt }: { prompt: string }) => {
+    return getHelpFromAdobePremierePro(prompt);
   },
 };
 
 function AltairComponent() {
-  const [lightSettings, setLightSettings] = useState<string>("");
+  const [adobePremiereProHelpPrompt, setAdobePremiereProHelpPrompt] =
+    useState<string>("");
   const { client, setConfig } = useLiveAPIContext();
 
   useEffect(() => {
@@ -77,14 +87,13 @@ function AltairComponent() {
       systemInstruction: {
         parts: [
           {
-            text: 'You are my helpful assistant. Any time I ask you for function change in the room brightness or color temperature, call the "controlLight" function I have provided you. Dont ask for additional information just make your best judgement.',
+            text: "You are an expert Adobe Premiere Pro teacher with deep knowledge of video editing workflows. Your role is to act as a helpful assistant, guiding me through Premiere Pro like a real-time tutor. You will help me understand the UI, tools, shortcuts, and best practices. If I get stuck on an editing task, you will provide step-by-step instructions, troubleshooting tips, and efficient workflows. Your explanations should be clear, concise, and practical, with a focus on improving my editing speed and quality. Give only one best option to user based on given prompt. Whenever necessary, use real-world examples and industry-standard techniques to enhance learning. use Adobe Premiere Pro official documentation",
           },
         ],
       },
       tools: [
         // there is a free-tier quota for search
         { googleSearch: {} },
-        { functionDeclarations: [controlLightFunctionDeclaration] },
       ],
     });
   }, [setConfig]);
@@ -93,18 +102,13 @@ function AltairComponent() {
     const onToolCall = (toolCall: ToolCall) => {
       console.log(`got toolcall`, toolCall);
       const fc = toolCall.functionCalls.find(
-        (fc) => fc.name === controlLightFunctionDeclaration.name
+        (fc) => fc.name === GetHelpFromAdobePremiereProDeclaration.name
       );
       if (fc) {
         // Handle controlLight function call
-        const brightness = (fc.args as any).brightness;
-        const colorTemperature = (fc.args as any).colorTemperature;
-        console.log(
-          `Setting light: brightness=${brightness}, colorTemperature=${colorTemperature}`
-        );
-        setLightSettings(
-          `brightness: ${brightness}, colorTemperature: ${colorTemperature}`
-        );
+        const prompt = (fc.args as any).prompt;
+
+        setAdobePremiereProHelpPrompt(prompt);
 
         // You can add state handling for the light settings here if needed
         // For example:
@@ -113,24 +117,30 @@ function AltairComponent() {
 
       // send data for the response of your tool call
       if (toolCall.functionCalls.length) {
-        setTimeout(
-          () =>
+        for (let index = 0; index < toolCall.functionCalls.length; index++) {
+          const functionCall = toolCall.functionCalls[index];
+          if (
+            functionCall.name === GetHelpFromAdobePremiereProDeclaration.name
+          ) {
+            console.log(`got function call`, functionCall);
+            // Call the actual function implementation
+            const apiResponse = getHelpFromAdobePremierePro(
+              (functionCall.args as any).prompt
+            );
+
+            // Send the response back to the model
             client.sendToolResponse({
-              functionResponses: toolCall.functionCalls.map((fc) => ({
-                response: {
-                  output: {
-                    success: true,
-                    message:
-                      fc.name === controlLightFunctionDeclaration.name
-                        ? "Light settings updated successfully"
-                        : "Operation successful",
+              functionResponses: [
+                {
+                  response: {
+                    output: apiResponse,
                   },
+                  id: functionCall.id,
                 },
-                id: fc.id,
-              })),
-            }),
-          200
-        );
+              ],
+            });
+          }
+        }
       }
     };
     client.on("toolcall", onToolCall);
@@ -139,7 +149,7 @@ function AltairComponent() {
     };
   }, [client]);
 
-  return <div>{lightSettings}</div>;
+  return <div>{adobePremiereProHelpPrompt}</div>;
 }
 
 export const Altair = memo(AltairComponent);
